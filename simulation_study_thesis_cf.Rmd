@@ -1,0 +1,2772 @@
+---
+title: "Simulation Study in Thesis"
+author: "Juho Lahteenmaa"
+date: "27 April 2020"
+output: 
+  pdf_document:
+    toc: true
+    number_sections: true
+    
+---
+```{r message=FALSE, warning=FALSE}
+require(dplyr)
+require(Rlab)
+require(ggplot2)
+require(plotly)
+require(grf)
+require(forcats)
+require(tidyr)
+require(gridExtra)
+
+set.seed(101)
+
+setwd("C:/Users/juhol/OneDrive/Documents/Tyokansio/Gradu/Koodit")
+
+```
+
+
+#Abstract
+Simulation study consists nine different SCMs (and the responding DAGs). Let's define the sample size to equal N = 10 000.
+
+```{r}
+n <- 10000
+```
+
+
+In the first part of this report, the simulation functions will be defined.In the second part the *causal forest* algorithm will be ran.
+
+#Functions
+
+
+##Randomized Controlled Trial with Constant Treatment Effect
+
+![Simulation 1](Kuvat/m2.PNG)
+
+
+```{r}
+#New exogeneous parameters and variables
+
+w_1 <- rbern(n, 1/2)
+
+u_y <- rnorm(n, mean = 100, sd = 10)
+
+tau <- 10
+
+# Variables X_1, ..., X_10
+
+X <- matrix(0, nrow = n, ncol = 10)
+
+for (k in 1:10) {
+  
+  
+  if(k%%2 != 0){    #if k is odd
+    
+    for (i in 1:n) {
+      
+      X[i, k] <- rnorm(1, mean = 0, sd = 1)
+    }
+    
+  } else {        #if k is even
+    
+      for (i in 1:n) {
+      
+        X[i, k] <- rbern(1, 1/2)
+    
+    }
+    
+  }
+}
+
+beta_X_k <- runif(10, min = -3, max = 3)
+
+#SCM
+
+y_1 <- tau*w_1 + X%*%beta_X_k + u_y  #Output
+
+```
+
+
+##Constant Treatment Effect with Unconfounded Assignment, Including Covariates Affecting to Output
+
+
+![Simulation 2](Kuvat/m3.PNG)
+
+```{r}
+#New exogeneous parameters and variables
+
+# Variables Z_1, Z_2
+
+z_1 <- rbern(n, 1/2)
+
+z_2 <- rbern(n, 1/2)
+
+Z <- cbind(z_1, z_2)
+
+u_w <- rnorm(n = n, mean = 0, sd = 1)
+
+gamma_z <- runif(2, min = -1, max =  1)
+
+
+#SCMs
+
+w_2_propensity <- 1/(1 + exp(-(Z%*%gamma_z + u_w))) #Underlying propensity scores
+
+w_2 <- rep.int(0, n)
+
+for (i in 1:n) {                      # Treatment assignment
+  w_2[i] <- rbern(1, w_2_propensity[i]) 
+}
+
+y_2 <-  tau*w_2 + X%*%beta_X_k + u_y  #Output
+
+
+```
+
+
+##Constant Treatment Effect with Confounded Assignment, Including Covariates Affecting to Output
+
+
+![Simulation 3-1](Kuvat/m4-1.PNG)
+
+
+![Simulation 3-2](Kuvat/m4-2.PNG)
+```{r}
+#New exogeneous parameters and variables
+
+#Confounders C_1, ..., C_10
+
+C <- matrix(0, nrow = n, ncol = 10)
+
+for (l in 1:10) {
+  
+  
+  if(l%%2 != 0){    #if k is odd
+    
+    for (i in 1:n) {
+      
+      C[i,l] <- rnorm(1, mean = 0, sd = 1)
+    }
+    
+  } else {        #if k is even
+    
+      for (i in 1:n) {
+      
+        C[i, l] <- rbern(1, 1/2)
+    
+    }
+    
+  }
+}
+
+
+gamma_C_l <- runif(10, min = -0.5, max = 0.5)    #Coefficients for confounders for W
+
+beta_C_l <- runif(10, min = -3, max = 3)    #Coefficients for confounders for Y
+
+
+#SCMs
+
+w_3_propensity <- 1/(1 + exp(-(Z%*%gamma_z + C%*%gamma_C_l + u_w))) #Underlying propensity scores
+
+w_3 <- rep.int(0, n)
+
+for (i in 1:n) {                      # Treatment assignment
+  w_3[i] <- rbern(1, w_2_propensity[i]) 
+}
+
+y_3 <-  tau*w_3 + X%*%beta_X_k + C%*%beta_C_l + u_y  #Output
+
+```
+
+
+
+##Constant Treatment Effect with Confounded Assignment, Including Covariates Affecting to Output and a Pure Local M-Structure
+
+
+![Simulation 4](Kuvat/m6.PNG)
+
+```{r}
+#New exogeneous parameters and variables
+
+# Unobserved covariates U_1 and U_2
+u_1 <- rbern(n, 1/2)
+u_2 <- rbern(n, 1/2)
+
+#Coefficients
+gamma_U_1 <- 0.5
+beta_U_2 <- 5
+
+delta_1 <- 5
+delta_2 <- 5
+
+#SCMs
+
+w_4_propensity <- 1/(1 + exp(-(Z%*%gamma_z + C%*%gamma_C_l + gamma_U_1*u_1 + u_w))) #Underlying propensity scores
+
+w_4 <- rep.int(0, n)
+
+for (i in 1:n) {                      # Treatment assignment
+  w_4[i] <- rbern(1, w_2_propensity[i]) 
+}
+
+m <- delta_1*u_1 + delta_2*u_2        # Observed collider M
+
+
+y_4 <-  tau*w_4 + X%*%beta_X_k + C%*%beta_C_l + beta_U_2*u_2 + u_y  #Output
+
+```
+
+
+
+##Constant Treatment Effect with Confounded Assignment, Including Covariates Affecting to Output and a Impure Local M-Structure
+
+
+
+![Simulation 5](Kuvat/m7.PNG)
+
+
+
+```{r}
+#New coefficient
+
+gamma_U_2 <- 0.2
+
+#SCMs
+
+w_5_propensity <- 1/(1 + exp(-(Z%*%gamma_z + C%*%gamma_C_l + gamma_U_1*u_1 + gamma_U_2*u_2 + u_w))) #Underlying propensity scores
+
+w_5 <- rep.int(0, n)
+
+for (i in 1:n) {                      # Treatment assignment
+  w_5[i] <- rbern(1, w_2_propensity[i]) 
+}
+
+y_5 <-  tau*w_5 + X%*%beta_X_k + C%*%beta_C_l + beta_U_2*u_2 + u_y     #Output
+```
+
+
+##Randomized Controlled Trial with Heterogeneous Treatment Effect, Including Covariates Affecting to Output
+
+
+
+![Simulation 6-1](Kuvat/m8-1.PNG)
+
+
+![Simulation 6-2](Kuvat/m8-2.PNG)
+
+```{r}
+#Heterogeneous treatment effect
+
+#Alphas
+
+alp_0 <- 2
+alp_1 <- 5
+alp_2 <- -5
+
+tau_1 <- rep.int(alp_0,n) + alp_1*X[,1] + alp_2*X[,2]*X[,3]  #Treatment effect
+
+ggplot(data = as.data.frame(tau_1), aes(x = tau_1)) +
+  geom_histogram(fill="#f68060", alpha=.6, binwidth = 0.5) + 
+  labs(title ="Simulation 6, Treatment Effect", x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+#SCM
+
+y_6 <- tau_1*w_1 + X%*%beta_X_k + u_y  #Output
+
+
+```
+
+
+##Heterogeneous Treatment Effect with the Confounded Assignment, Including Covariates Affecting to Output
+
+
+![Simulation 7](Kuvat/m9.PNG)
+
+```{r}
+#New alpha
+
+alp_3 <- 3
+  
+tau_2 <- rep.int(alp_0,n) + alp_1*X[,1] + alp_2*X[,2]*X[,3] + alp_3*C[,1]   #Treatment effect 
+  
+ggplot(data = as.data.frame(tau_2), aes(x = tau_2)) +
+  geom_histogram(fill="#f68060", alpha=.6,binwidth = 0.5) + 
+  labs(title ="Simulation 7, Treatment Effect", x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+
+#SCM
+
+y_7 <-  tau_2*w_3 + X%*%beta_X_k + C%*%beta_C_l + u_y  #Output
+  
+```
+
+
+##Heterogeneous Treatment Effect with Confounded Assignment, Including Covariates Affecting to Output and a Pure Local M-Structure
+
+
+
+![Simulation 8](Kuvat/m11.PNG)
+
+
+
+```{r}
+#SCM
+
+y_8 <-  tau_2*w_4 + X%*%beta_X_k + C%*%beta_C_l + beta_U_2*u_2 + u_y  #Output
+
+```
+
+
+##Heterogeneous Treatment Effect with Confounded Assignment, Including Covariates Affecting to Output and a Impure Local M-Structure
+
+
+
+
+![Simulation 9](Kuvat/m12.PNG)
+
+
+
+```{r}
+#SCM
+
+y_9 <- tau_2*w_5 + X%*%beta_X_k + C%*%beta_C_l + beta_U_2*u_2 + u_y     #Output
+
+```
+
+All the parameters, table:
+
+```{r}
+#Betas
+
+betas <- as.data.frame(c(beta_X_k, beta_C_l, beta_U_2))
+
+rownames(betas) <- c("$\\beta_{X_1}$",
+                     "$\\beta_{X_2}$",
+                     "$\\beta_{X_3}$",
+                     "$\\beta_{X_4}$",
+                     "$\\beta_{X_5}$",
+                     "$\\beta_{X_6}$",
+                     "$\\beta_{X_7}$",
+                     "$\\beta_{X_8}$",
+                     "$\\beta_{X_9}$",
+                     "$\\beta_{X_10}$",
+                     "$\\beta_{C_1}$",
+                     "$\\beta_{C_2}$",
+                     "$\\beta_{C_3}$",
+                     "$\\beta_{C_4}$",
+                     "$\\beta_{C_5}$",
+                     "$\\beta_{C_6}$",
+                     "$\\beta_{C_7}$",
+                     "$\\beta_{C_8}$",
+                     "$\\beta_{C_9}$",
+                     "$\\beta_{C_10}$",
+                     "$\\beta_{U_2}$")
+
+colnames(betas) <- c("Value")
+
+knitr::kable(betas, escape = FALSE)
+
+```
+
+```{r}
+
+gammas <- as.data.frame(c(gamma_z, gamma_C_l, gamma_U_1))
+
+rownames(gammas) <- c("$\\gamma_{Z_1}$",
+                     "$\\gamma_{Z_2}$",
+                     "$\\gamma_{C_1}$",
+                     "$\\gamma_{C_2}$",
+                     "$\\gamma_{C_3}$",
+                     "$\\gamma_{C_4}$",
+                     "$\\gamma_{C_5}$",
+                     "$\\gamma_{C_6}$",
+                     "$\\gamma_{C_7}$",
+                     "$\\gamma_{C_8}$",
+                     "$\\gamma_{C_9}$",
+                     "$\\gamma_{C_{10}}$",
+                     "$\\gamma_{U_1}$")
+
+colnames(gammas) <- c("Value")
+
+knitr::kable(gammas, escape = FALSE)
+```
+
+
+```{r}
+deltas <- as.data.frame(c(delta_1, delta_2))
+
+rownames(deltas) <- c("$\\delta_1$", "$\\delta_2$")
+
+colnames(deltas) <- c("Value")
+
+knitr::kable(deltas, escape = FALSE)
+```
+
+As LaTeX:
+```{r}
+knitr::kable(betas, format = "latex", escape = FALSE)
+
+knitr::kable(gammas, format = "latex", escape = FALSE)
+
+knitr::kable(deltas, format = "latex" , escape = FALSE)
+
+```
+
+
+
+
+#Causal Forest
+
+In the simulation study, we are using the _causal forest_ . The function is in _grf_ package which can be found from [CRAN](https://cran.r-project.org/web/packages/grf/grf.pdf). See also [this](https://github.com/grf-labs/grf/blob/master/REFERENCE.md).
+
+
+In each subsection, the causal boosting algorithm will be ran. The performance in each simulations are tested with _root mean squared error_: $$\widehat{\text{RMSE}}=\sqrt{\frac{1}{n}\sum_{i=1}^{n}\left[(\tau(x)-\hat{\tau}(x)\right]^2}$$
+
+```{r}
+fun.rmse <- function(predicted, true){
+  
+  rmse <- sqrt(mean((true - predicted)^2))
+  
+  rmse
+}
+
+```
+
+Also the _proportional difference in the ATE estimates_ for the whole population is calcucated (with 95 % confidence interval):
+$$\frac{\tau_{\text{ATE}}-\hat{\tau}_{ATE}}{\tau_{ATE}}$$
+```{r}
+fun.diff_ATE <- function(ATE_est, ATE_true){
+  
+  print("Proportional mean of the differences:")
+  
+  diff_mean <- (ATE_true - ATE_est[1])/ATE_true
+  
+  print(diff_mean)
+  
+  print("Proportional mean of the differences, 95 % confidence intervals:")
+  
+  print(c((diff_mean - ATE_est[2]/ATE_true), (diff_mean + ATE_est[2]/ATE_true)))
+  
+}
+```
+
+The 95 % coverage of the CATEs:
+
+```{r}
+# Is the real value in the 95% confidence interval
+
+fun.coverage <- function(predicted, true){
+  
+  cate <- predicted$predictions
+  
+  std_error <- sqrt(predicted$variance.estimates)
+  
+  confint <- matrix(c((cate - qnorm(1 - 0.025)*std_error), 
+                      (cate + qnorm(1 - 0.025)*std_error)), ncol = 2)
+  
+  fun.is_in_confint <- function(value, min, max){
+    
+    (value >= min)&(value <= max)
+    
+  }
+    
+  in_confint <- cbind(true, confint) %>% 
+    as.data.frame()  %>% 
+    mutate(in_confint = fun.is_in_confint(true, V2, V3)) %>%
+    select(in_confint)   
+  
+  length(which(in_confint$in_confint == TRUE))/length(in_confint$in_confint)
+  
+}
+```
+
+
+Also the running times for the algorithm are given for each simulation. Let's remark the adjusted set with $\mathbb{S}$.
+
+##Randomized Controlled Trial with Constant Treatment Effect
+
+$X\in\mathbb{S}$
+
+```{r}
+
+# Estimate causal forest
+start_time_1 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf1.full <- grf::causal_forest(X, y_1, w_1)
+
+
+end_time_1 <- Sys.time()
+
+#Predicted values
+
+pred_tau_1.full <- predict(cf1.full, estimate.variance = TRUE)
+
+plot_pred_tau_1 <- ggplot(data = as.data.frame(pred_tau_1.full$predictions), 
+                        aes(x = (pred_tau_1.full$predictions))) +
+  geom_histogram(fill="#f68060", alpha=.6,binwidth = 0.1) + 
+  labs(title ="Simulation 1 with full X", 
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_1
+```
+
+Runing time:
+```{r}
+start_time_1 - end_time_1
+```
+
+
+RMSE:
+```{r}
+rmse_1.full <- fun.rmse(predicted = pred_tau_1.full$predictions, true = tau)
+
+rmse_1.full
+```
+
+Coverage:
+
+```{r}
+coverage_1.full <- fun.coverage(pred_tau_1.full, tau)
+
+coverage_1.full
+
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_1.full <- average_treatment_effect(cf1.full)
+
+
+ATE_est_1.full
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_1.full, ATE_true = tau) 
+
+```
+
+
+```{r}
+true_vs_pred_1.full <- as.data.frame(cbind(tau, pred_tau_1.full$predictions))
+
+colnames(true_vs_pred_1.full) <- c("tau", "pred_tau")
+
+true_vs_pred_1.full$tau <- true_vs_pred_1.full$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot1 <- ggplot(data = true_vs_pred_1.full, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 1 with full X", 
+       x = "True treatment effect", y = "Estimated treatment effect", 
+       fill = "Count") +
+  lims(x = c(min(true_vs_pred_1.full$pred_tau), 
+             max(true_vs_pred_1.full$pred_tau)), 
+       y = c(min(true_vs_pred_1.full$pred_tau), 
+             max(true_vs_pred_1.full$pred_tau)))
+
+plot1
+```
+
+Let's try to use only the most important (_"A simple weighted sum of how many times feature i was split on at each depth in the forest"_) variables (over the median):
+
+
+```{r}
+important_var_1 <- which(variable_importance(cf1.full) >= median(variable_importance(cf1.full))) #Variables over the median
+```
+
+
+
+```{r}
+
+# Estimate causal forest
+start_time_1_2 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf1.important <- grf::causal_forest(X[, important_var_1], y_1, w_1)
+
+
+end_time_1_2 <- Sys.time()
+
+#Predicted values
+
+pred_tau_1.important <- predict(cf1.important, estimate.variance = TRUE)
+
+plot_pred_tau_1_2 <- ggplot(data = as.data.frame(pred_tau_1.important$predictions), 
+                        aes(x = (pred_tau_1.important$predictions))) +
+  geom_histogram(fill="#f68060", alpha=.6, binwidth = 0.1) + 
+  labs(title ="Simulation 1 with a subset of X", 
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_1_2
+```
+
+Runing time:
+```{r}
+start_time_1_2 - end_time_1_2
+```
+
+
+RMSE:
+```{r}
+rmse_1.important <- fun.rmse(predicted = pred_tau_1.important$predictions, true = tau)
+
+rmse_1.important
+```
+
+Coverage:
+
+```{r}
+coverage_1.important <- fun.coverage(pred_tau_1.important, tau)
+
+coverage_1.important
+
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_1.important <- average_treatment_effect(cf1.important)
+
+
+ATE_est_1.important
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_1.important, ATE_true = tau) 
+
+```
+
+
+```{r}
+true_vs_pred_1.important <- as.data.frame(cbind(tau, pred_tau_1.important$predictions))
+
+colnames(true_vs_pred_1.important) <- c("tau", "pred_tau")
+
+true_vs_pred_1.important$tau <- true_vs_pred_1.important$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot1_2 <- ggplot(data = true_vs_pred_1.important, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 1 with a subset of X", 
+       x = "True treatment effect", y = "Estimated treatment effect", 
+       fill = "Count") +
+  lims(x = c(min(true_vs_pred_1.important$pred_tau), 
+             max(true_vs_pred_1.important$pred_tau)), 
+       y = c(min(true_vs_pred_1.important$pred_tau), 
+             max(true_vs_pred_1.important$pred_tau)))
+
+plot1_2
+```
+
+
+*Summary*
+
+Predicted $\hat{\tau}s$:
+
+```{r}
+grid.arrange(plot_pred_tau_1, plot_pred_tau_1_2, nrow = 1)
+```
+
+True $\tau$ vs. predicted $\hat{\tau}$:
+
+```{r}
+grid.arrange(plot1, plot1_2, nrow = 1)
+
+```
+
+RMSEs:
+
+```{r}
+
+rmse_1 <- as.data.frame(c(rmse_1.full, rmse_1.important))
+
+rownames(rmse_1) <- c("Full $X$", "Subset of $X$")
+
+colnames(rmse_1) <- c("RMSE")
+
+knitr::kable(rmse_1, escape = FALSE)
+```
+
+Coverages:
+
+```{r}
+
+coverage_1 <- as.data.frame(c(coverage_1.full, coverage_1.important))
+
+rownames(coverage_1) <- c("Full $X$", "Subset of $X$")
+
+colnames(coverage_1) <- c("Coverage")
+
+knitr::kable(coverage_1, escape = FALSE)
+
+```
+
+LaTeX:
+
+```{r}
+knitr::kable(rmse_1, format = "latex",escape = FALSE)
+
+knitr::kable(coverage_1, format = "latex",escape = FALSE)
+```
+
+  
+##Constant Treatment Effect with Unconfounded Assignment, Including Covariates Affecting to Output
+
+
+
+Let's do the first estimation without the $Z$s ($X\in\mathbb{S}$):
+```{r}
+
+# Estimate causal forest
+start_time_2 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf2.no_z <- grf::causal_forest(X, y_2, w_2)
+
+
+end_time_2 <- Sys.time()
+
+#Predicted values
+
+pred_tau_2.no_z <-predict(cf2.no_z, estimate.variance = TRUE)
+
+plot_pred_tau_2 <- ggplot(data = as.data.frame(pred_tau_2.no_z$predictions), 
+       aes(x = (pred_tau_2.no_z$predictions))) +
+  geom_histogram(fill="#f68060", alpha=.6,binwidth = 0.1) + 
+  labs(title ="Simulation 2 without Z", 
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_2
+```
+
+Runing time:
+```{r}
+start_time_2 - end_time_2
+```
+
+
+RMSE:
+```{r}
+rmse_2.no_z <- fun.rmse(predicted = pred_tau_2.no_z$predictions, true = tau)
+
+rmse_2.no_z
+```
+
+
+Coverage:
+
+```{r}
+coverage_2.no_z <- fun.coverage(pred_tau_2.no_z, tau)
+
+coverage_2.no_z
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_2.no_z <- average_treatment_effect(cf2.no_z)
+
+ATE_est_2.no_z
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_2.no_z, ATE_true = tau) 
+```
+
+
+```{r}
+true_vs_pred_2.no_z <- as.data.frame(cbind(tau, pred_tau_2.no_z$predictions))
+
+colnames(true_vs_pred_2.no_z) <- c("tau", "pred_tau")
+
+true_vs_pred_2.no_z$tau <- true_vs_pred_2.no_z$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot2 <- ggplot(data = true_vs_pred_2.no_z, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 2 without Z", 
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_2.no_z$pred_tau), max(true_vs_pred_2.no_z$pred_tau)), 
+       y = c(min(true_vs_pred_2.no_z$pred_tau), max(true_vs_pred_2.no_z$pred_tau)))
+
+plot2
+```
+
+$X \cup Z\in\mathbb{S}$s. 
+```{r}
+
+# Estimate causal forest
+start_time_3 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf2.with_z <- grf::causal_forest(cbind(X, Z), y_2, w_2, orthog.boosting = FALSE)
+
+
+end_time_3 <- Sys.time()
+
+#Predicted values
+
+pred_tau_2.with_z <-predict(cf2.with_z, estimate.variance = TRUE)
+
+plot_pred_tau_3 <- ggplot(data = as.data.frame(pred_tau_2.with_z$predictions), 
+       aes(x = (pred_tau_2.with_z$predictions))) +
+  geom_histogram(fill="#f68060", alpha=.6, binwidth = 0.1) + 
+  labs(title ="Simulation 2 with Z",
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_3
+```
+
+Runing time:
+```{r}
+start_time_3 - end_time_3
+```
+
+
+RMSE:
+```{r}
+rmse_2.with_z <- fun.rmse(predicted = pred_tau_2.with_z$predictions, true = tau)
+
+rmse_2.with_z
+```
+
+
+Coverage:
+
+```{r}
+coverage_2.with_z <- fun.coverage(pred_tau_2.with_z, tau)
+
+coverage_2.with_z
+```
+
+
+Estimated ATE:
+```{r}
+ATE_est_2.with_z <- average_treatment_effect(cf2.with_z)
+
+ATE_est_2.with_z
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_2.with_z, ATE_true = tau) 
+```
+
+
+```{r}
+true_vs_pred_2.with_z <- as.data.frame(cbind(tau, pred_tau_2.with_z$predictions))
+
+colnames(true_vs_pred_2.with_z) <- c("tau", "pred_tau")
+
+true_vs_pred_2.with_z$tau <- true_vs_pred_2.with_z$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot3 <- ggplot(data = true_vs_pred_2.with_z, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 2 with Z", 
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_2.with_z$pred_tau), 
+             max(true_vs_pred_2.with_z$pred_tau)), 
+       y = c(min(true_vs_pred_2.with_z$pred_tau), 
+             max(true_vs_pred_2.with_z$pred_tau)))
+
+plot3
+```
+
+
+
+
+*Summary*
+
+Predicted $\hat{\tau}s$:
+
+```{r}
+grid.arrange(plot_pred_tau_2, plot_pred_tau_3, nrow = 1)
+```
+
+True $\tau$ vs. predicted $\hat{\tau}$:
+
+```{r}
+grid.arrange(plot2, plot3, nrow = 1)
+
+```
+
+RMSEs:
+
+```{r}
+
+rmse_2 <- as.data.frame(c(rmse_2.no_z, rmse_2.with_z))
+
+rownames(rmse_2) <- c("Without $Z$", "With $Z$")
+
+colnames(rmse_2) <- c("RMSE")
+
+knitr::kable(rmse_2, escape = FALSE)
+```
+
+Coverages:
+
+```{r}
+
+coverage_2 <- as.data.frame(c(coverage_2.no_z, coverage_2.with_z))
+
+rownames(coverage_2) <- c("Without $Z$", "With $Z$")
+
+colnames(coverage_2) <- c("Coverage")
+
+knitr::kable(coverage_2, escape = FALSE)
+
+```
+
+LaTeX:
+
+```{r}
+knitr::kable(rmse_2, format = "latex",escape = FALSE)
+
+knitr::kable(coverage_2, format = "latex",escape = FALSE)
+```
+
+
+
+##Constant Treatment Effect with Confounded Assignment, Including Covariates Affecting to Output
+
+
+
+Let's do the first estimation with all the observed variables $X \cup Z  \cup  C\in\mathbb{S}$. [orthogonalization](https://github.com/grf-labs/grf/blob/master/REFERENCE.md#orthogonalization) is not used in the first test:
+```{r}
+
+# Estimate causal forest
+start_time_4 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf3.no_ort <- grf::causal_forest(cbind(X, Z, C), y_3, w_3, orthog.boosting = FALSE)
+
+
+end_time_4 <- Sys.time()
+
+#Predicted values
+
+pred_tau_3.no_ort <-predict(cf3.no_ort, estimate.variance = TRUE)
+
+plot_pred_tau_4 <- ggplot(data = as.data.frame(pred_tau_3.no_ort$predictions), 
+       aes(x = (pred_tau_3.no_ort$predictions))) +
+  geom_histogram(fill="#f68060", alpha=.6, binwidth = 0.1) + 
+  labs(title ="Simulation 3 with no orthogonalization",
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_4
+
+```
+
+Runing time:
+```{r}
+start_time_4 - end_time_4
+```
+
+
+RMSE:
+```{r}
+rmse_3.no_ort <- fun.rmse(predicted = pred_tau_3.no_ort$predictions, true = tau)
+
+rmse_3.no_ort
+```
+
+
+
+Coverage:
+
+```{r}
+coverage_3.no_ort <- fun.coverage(pred_tau_3.no_ort, tau)
+
+coverage_3.no_ort
+
+```
+
+Estimated ATE:
+```{r}
+ATE_est_3.no_ort <- average_treatment_effect(cf3.no_ort)
+
+ATE_est_3.no_ort
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_3.no_ort, ATE_true = tau) 
+```
+
+
+```{r}
+true_vs_pred_3.no_ort <- as.data.frame(cbind(tau, pred_tau_3.no_ort$predictions))
+
+colnames(true_vs_pred_3.no_ort) <- c("tau", "pred_tau")
+
+true_vs_pred_3.no_ort$tau <- true_vs_pred_3.no_ort$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot4 <- ggplot(data = true_vs_pred_3.no_ort, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 3 with no orthogonalization", 
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_3.no_ort$pred_tau), max(true_vs_pred_3.no_ort$pred_tau)), 
+       y = c(min(true_vs_pred_3.no_ort$pred_tau), max(true_vs_pred_3.no_ort$pred_tau)))
+
+plot4
+```
+
+
+
+
+$X \cup Z \cup C\in \mathbb{S}$. Orthogonalizarion is used in the second test:
+```{r}
+
+# Estimate causal forest
+start_time_5 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf3.with_ort <- grf::causal_forest(cbind(X, Z, C), y_3, w_3, orthog.boosting = TRUE)
+
+
+end_time_5 <- Sys.time()
+
+#Predicted values
+
+pred_tau_3.with_ort <-predict(cf3.with_ort, estimate.variance = TRUE)
+
+plot_pred_tau_5 <- ggplot(data = as.data.frame(pred_tau_3.with_ort$predictions)
+                          , aes(x = (pred_tau_3.with_ort$predictions))) +
+  geom_histogram(fill="#f68060", alpha=.6, binwidth = 0.1) + 
+  labs(title ="Simulation 3 with with orthogonalization", 
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_5
+```
+
+Runing time:
+```{r}
+start_time_5 - end_time_5
+```
+
+
+RMSE:
+```{r}
+rmse_3.with_ort <- fun.rmse(predicted = pred_tau_3.with_ort$predictions, true = tau)
+
+rmse_3.with_ort
+```
+
+
+Coverage:
+
+```{r}
+coverage_3.with_ort <- fun.coverage(pred_tau_3.with_ort, tau)
+
+coverage_3.with_ort
+
+```
+
+
+Estimated ATE:
+```{r}
+ATE_est_3.with_ort <- average_treatment_effect(cf3.with_ort)
+
+ATE_est_3.with_ort
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_3.with_ort, ATE_true = tau) 
+```
+
+
+```{r}
+true_vs_pred_3.with_ort <- as.data.frame(cbind(tau, pred_tau_3.with_ort$predictions))
+
+colnames(true_vs_pred_3.with_ort) <- c("tau", "pred_tau")
+
+true_vs_pred_3.with_ort$tau <- true_vs_pred_3.with_ort$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot5 <- ggplot(data = true_vs_pred_3.with_ort, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 3 with no orthogonalization",
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_3.with_ort$pred_tau), max(true_vs_pred_3.with_ort$pred_tau)), 
+       y = c(min(true_vs_pred_3.with_ort$pred_tau), max(true_vs_pred_3.with_ort$pred_tau)))
+
+plot5
+```
+
+
+As the third test, let's try to use only the most important variables (over the median):
+
+```{r}
+important_var_3 <- which(variable_importance(cf3.with_ort) >= median(variable_importance(cf3.with_ort))) #Variables over the median
+
+
+```
+
+```{r}
+
+# Estimate causal forest
+start_time_6 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf3.important <- grf::causal_forest(cbind(X, Z, C)[, important_var_3], y_3, w_3, orthog.boosting = TRUE)
+
+
+end_time_6 <- Sys.time()
+
+#Predicted values
+
+pred_tau_3.important <- predict(cf3.important, estimate.variance = TRUE)
+
+plot_pred_tau_6 <- ggplot(data = as.data.frame(pred_tau_3.important$predictions),
+       aes(x = (pred_tau_3.important$predictions))) +
+  geom_histogram(fill="#f68060", alpha=.6, binwidth = 0.1) + 
+  labs(title ="Simulation 3 with a subset of observed variables",
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_6
+```
+
+Runing time:
+```{r}
+start_time_6 - end_time_6
+```
+
+
+RMSE:
+```{r}
+rmse_3.important <- fun.rmse(predicted = pred_tau_3.important$predictions, true = tau)
+
+rmse_3.important
+```
+
+
+Coverage:
+
+```{r}
+coverage_3.important <- fun.coverage(pred_tau_3.important, tau)
+
+coverage_3.important
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_3.important <- average_treatment_effect(cf3.important)
+
+ATE_est_3.important
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_3.important, ATE_true = tau) 
+```
+
+
+```{r}
+true_vs_pred_3.important <- as.data.frame(cbind(tau, pred_tau_3.important$predictions))
+
+colnames(true_vs_pred_3.important) <- c("tau", "pred_tau")
+
+true_vs_pred_3.important$tau <- true_vs_pred_3.important$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot6 <- ggplot(data = true_vs_pred_3.important, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 3 with a subset of observed variables",
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_3.important$pred_tau), max(true_vs_pred_3.important$pred_tau)), 
+       y = c(min(true_vs_pred_3.important$pred_tau), max(true_vs_pred_3.important$pred_tau)))
+
+plot6
+```
+
+As the last test, let's test the backdoor criterion (adjusting only for $C\in\mathbb{S}$):
+
+```{r}
+
+# Estimate causal forest
+start_time_7 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf3.bd <- grf::causal_forest(C, y_3, w_3, orthog.boosting = TRUE)
+
+
+end_time_7 <- Sys.time()
+
+#Predicted values
+
+pred_tau_3.bd <- predict(cf3.bd, estimate.variance = TRUE)
+
+plot_pred_tau_7 <- ggplot(data = as.data.frame(pred_tau_3.bd$predictions), 
+       aes(x = (pred_tau_3.bd$predictions))) +
+  geom_histogram(fill="#f68060", alpha=.6, binwidth = 0.1) + 
+  labs(title ="Simulation 3 with only C adjusted", 
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_7
+```
+
+Runing time:
+```{r}
+start_time_7 - end_time_7
+```
+
+
+RMSE:
+```{r}
+rmse_3.bd <- fun.rmse(predicted = pred_tau_3.bd$predictions, true = tau)
+
+rmse_3.bd
+```
+
+
+
+Coverage:
+
+```{r}
+coverage_3.bd <- fun.coverage(pred_tau_3.bd, tau)
+
+coverage_3.bd
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_3.bd <- average_treatment_effect(cf3.bd)
+
+ATE_est_3.bd
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_3.bd, ATE_true = tau) 
+```
+
+
+```{r}
+true_vs_pred_3.bd <- as.data.frame(cbind(tau, pred_tau_3.bd$predictions))
+
+colnames(true_vs_pred_3.bd) <- c("tau", "pred_tau")
+
+true_vs_pred_3.bd$tau <- true_vs_pred_3.bd$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot7 <- ggplot(data = true_vs_pred_3.bd, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 3 with only C adjusted", 
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_3.bd$pred_tau), max(true_vs_pred_3.bd$pred_tau)),
+       y = c(min(true_vs_pred_3.bd$pred_tau), max(true_vs_pred_3.bd$pred_tau)))
+
+plot7
+```
+
+
+
+
+*Summary*
+
+Predicted $\hat{\tau}s$:
+
+```{r}
+grid.arrange(plot_pred_tau_4, plot_pred_tau_5, plot_pred_tau_6, plot_pred_tau_7, nrow = 2)
+```
+
+True $\tau$ vs. predicted $\hat{\tau}$:
+
+```{r}
+grid.arrange(plot4, plot5, plot6, plot7, nrow = 2)
+
+```
+
+RMSEs:
+
+```{r}
+
+rmse_3 <- as.data.frame(c(rmse_3.no_ort, rmse_3.with_ort, rmse_3.important, rmse_3.bd))
+
+rownames(rmse_3) <- c("No orthogonalization", "With orthogonalization", 
+                      "Subset of observed variables", "Only confounders adjusted")
+
+colnames(rmse_3) <- c("RMSE")
+
+knitr::kable(rmse_3, escape = FALSE)
+```
+
+Coverages:
+
+```{r}
+
+coverage_3 <- as.data.frame(c(coverage_3.no_ort, coverage_3.with_ort, 
+                              coverage_3.important, coverage_3.bd))
+
+rownames(coverage_3) <- c("No orthogonalization", "With orthogonalization", 
+                      "Subset of observed variables", "Only confounders adjusted")
+
+colnames(coverage_3) <- c("Coverage")
+
+knitr::kable(coverage_3, escape = FALSE)
+
+```
+
+LaTeX:
+
+```{r}
+knitr::kable(rmse_3, format = "latex",escape = FALSE)
+
+knitr::kable(coverage_3, format = "latex",escape = FALSE)
+```
+
+
+
+
+
+
+##Constant Treatment Effect with Confounded Assignment, Including Covariates Affecting to Output and a Pure Local M-Structure
+
+Let's adjust the collider $M$ (incorrectly) and then leave it out from the adjusted set $\mathbb{S}$ ($X \cup Z \cup C \cup M \in \mathbb{S}$).
+
+```{r}
+
+# Estimate causal forest
+start_time_8 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf4.with_M <- grf::causal_forest(cbind(X, Z, C, m), y_4, w_4, orthog.boosting = TRUE)
+
+
+end_time_8 <- Sys.time()
+
+#Predicted values
+
+pred_tau_4.with_M <- predict(cf4.with_M, estimate.variance = TRUE)
+
+plot_pred_tau_8 <- ggplot(data = as.data.frame(pred_tau_4.with_M$predictions), 
+       aes(x = (pred_tau_4.with_M$predictions))) +
+  geom_histogram(fill="#f68060", alpha=.6, binwidth = 0.1) + 
+  labs(title ="Simulation 4, M adjusted", 
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_8
+```
+
+Runing time:
+```{r}
+start_time_8 - end_time_8
+```
+
+
+RMSE:
+```{r}
+rmse_4.with_M <- fun.rmse(predicted = pred_tau_4.with_M$predictions, true = tau)
+
+rmse_4.with_M
+```
+
+Coverage:
+
+```{r}
+coverage_4.with_M <- fun.coverage(pred_tau_4.with_M, tau)
+
+coverage_4.with_M
+```
+
+
+Estimated ATE:
+```{r}
+ATE_est_4.with_M <- average_treatment_effect(cf4.with_M)
+
+ATE_est_4.with_M
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_4.with_M, ATE_true = tau) 
+```
+
+
+```{r}
+true_vs_pred_4.with_M <- as.data.frame(cbind(tau, pred_tau_4.with_M$predictions))
+
+colnames(true_vs_pred_4.with_M) <- c("tau", "pred_tau")
+
+true_vs_pred_4.with_M$tau <- true_vs_pred_4.with_M$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot8 <- ggplot(data = true_vs_pred_4.with_M, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 4, M adjusted",
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_4.with_M$pred_tau), max(true_vs_pred_4.with_M$pred_tau)),
+       y = c(min(true_vs_pred_4.with_M$pred_tau), max(true_vs_pred_4.with_M$pred_tau)))
+
+plot8
+```
+
+How "important" variable $M$ was?
+
+```{r}
+names4.with_M.X <- paste("X", 1:10, sep = "")
+
+names4.with_M.Z <- paste("Z", 1:2, sep = "")
+
+names4.with_M.C <- paste("C", 1:10, sep = "")
+
+names4.with_M <- list(names4.with_M.X, names4.with_M.Z, names4.with_M.C, c("M"))
+
+important_var_4.with_M <- as.data.frame(grf::variable_importance(cf4.with_M), row.names = Reduce(c, names4.with_M))
+
+important_var_4.with_M %>%
+  mutate(name = fct_reorder(row.names(important_var_4.with_M), V1)) %>%
+  ggplot(aes(x = name, y = V1)) + 
+  geom_bar(stat="identity", fill="#f68060", alpha=.6, width=.6) +
+  coord_flip() +
+  labs(title ="Simulation 4, Important variables", x = "Variable", y = "Weighted sum of the number of splits in which used") + 
+  theme_minimal()
+  
+
+```
+
+
+
+
+The following estimation is done by excluding the $M$ from the ajusted set $\mathbb{S}$ ($X \cup Z \cup C\in \mathbb{S}$):
+
+
+```{r}
+
+# Estimate causal forest
+start_time_9 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf4.no_M <- grf::causal_forest(cbind(X, Z, C), y_4, w_4, orthog.boosting = TRUE)
+
+
+end_time_9 <- Sys.time()
+
+#Predicted values
+
+pred_tau_4.no_M <- predict(cf4.no_M, estimate.variance = TRUE)
+
+plot_pred_tau_9 <- ggplot(data = as.data.frame(pred_tau_4.no_M$predictions), 
+                          aes(x = (pred_tau_4.no_M$predictions))) +
+  geom_histogram(binwidth = 0.1, fill="#f68060", alpha=.6) + 
+  labs(title ="Simulation 4, M not adjusted",
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_9
+```
+
+Runing time:
+```{r}
+start_time_9 - end_time_9
+```
+
+
+RMSE:
+```{r}
+rmse_4.no_M <- fun.rmse(predicted = pred_tau_4.no_M$predictions, true = tau)
+
+rmse_4.no_M
+```
+
+Coverage:
+
+```{r}
+coverage_4.no_M <- fun.coverage(pred_tau_4.no_M, tau)
+
+coverage_4.no_M
+
+```
+
+
+Estimated ATE:
+```{r}
+ATE_est_4.no_M <- average_treatment_effect(cf4.no_M)
+
+ATE_est_4.no_M
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_4.no_M, ATE_true = tau) 
+```
+
+
+```{r}
+true_vs_pred_4.no_M <- as.data.frame(cbind(tau, pred_tau_4.no_M$predictions))
+
+colnames(true_vs_pred_4.no_M) <- c("tau", "pred_tau")
+
+true_vs_pred_4.no_M$tau <- true_vs_pred_4.no_M$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot9 <- ggplot(data = true_vs_pred_4.no_M, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 4, M not adjusted", 
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_4.no_M$pred_tau), max(true_vs_pred_4.no_M$pred_tau)),
+       y = c(min(true_vs_pred_4.no_M$pred_tau), max(true_vs_pred_4.no_M$pred_tau)))
+
+plot9
+```
+
+
+
+
+
+*Summary*
+
+Predicted $\hat{\tau}s$:
+
+```{r}
+grid.arrange(plot_pred_tau_8, plot_pred_tau_9, nrow = 1)
+```
+
+True $\tau$ vs. predicted $\hat{\tau}$:
+
+```{r}
+grid.arrange(plot8, plot9, nrow = 1)
+
+```
+
+RMSEs:
+
+```{r}
+
+rmse_4 <- as.data.frame(c(rmse_4.with_M, rmse_4.no_M))
+
+rownames(rmse_4) <- c("$M$ adjusted", "$M$ not adjusted")
+
+colnames(rmse_4) <- c("RMSE")
+
+knitr::kable(rmse_4, escape = FALSE)
+```
+
+Coverages:
+
+```{r}
+
+coverage_4 <- as.data.frame(c(coverage_4.with_M, coverage_4.no_M))
+
+rownames(coverage_4) <-  c("$M$ adjusted", "$M$ not adjusted")
+
+colnames(coverage_4) <- c("Coverage")
+
+knitr::kable(coverage_4, escape = FALSE)
+
+```
+
+LaTeX:
+
+```{r}
+knitr::kable(rmse_4, format = "latex",escape = FALSE)
+
+knitr::kable(coverage_4, format = "latex",escape = FALSE)
+```
+
+
+
+
+##Constant Treatment Effect with Confounded Assignment, Including Covariates Affecting to Output and a Impure Local M-Structure
+
+The following estimation with $X \cup Z \cup C \cup M\in\mathbb{S}$:
+
+
+```{r}
+
+# Estimate causal forest
+start_time_10 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf5.with_M <- grf::causal_forest(cbind(X, Z, C, m), y_5, w_5, orthog.boosting = TRUE)
+
+
+end_time_10 <- Sys.time()
+
+#Predicted values
+
+pred_tau_5.with_M <- predict(cf5.with_M, estimate.variance = TRUE)
+
+plot_pred_tau_10 <- ggplot(data = as.data.frame(pred_tau_5.with_M$predictions),
+       aes(x = (pred_tau_5.with_M$predictions))) +
+  geom_histogram(binwidth = 0.1, fill="#f68060", alpha=.6) + 
+  labs(title ="Simulation 5, M adjusted",
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_10
+```
+
+Runing time:
+```{r}
+start_time_10 - end_time_10
+```
+
+
+RMSE:
+```{r}
+rmse_5.with_M <- fun.rmse(predicted = pred_tau_5.with_M$predictions, true = tau)
+
+rmse_5.with_M
+```
+
+Coverage:
+
+```{r}
+coverage_5.with_M <- fun.coverage(pred_tau_5.with_M, tau)
+
+coverage_5.with_M
+```
+
+
+Estimated ATE:
+```{r}
+ATE_est_5.with_M <- average_treatment_effect(cf5.with_M)
+
+ATE_est_5.with_M
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_5.with_M, ATE_true = tau) 
+```
+
+
+```{r}
+true_vs_pred_5.with_M <- as.data.frame(cbind(tau, pred_tau_5.with_M$predictions))
+
+colnames(true_vs_pred_5.with_M) <- c("tau", "pred_tau")
+
+true_vs_pred_5.with_M$tau <- true_vs_pred_5.with_M$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot10 <- ggplot(data = true_vs_pred_5.with_M, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 5, M adjusted", 
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_5.with_M$pred_tau), max(true_vs_pred_5.with_M$pred_tau)), 
+       y = c(min(true_vs_pred_5.with_M$pred_tau), max(true_vs_pred_5.with_M$pred_tau)))
+
+plot10
+```
+
+The following estimation with $M\not\in\mathbb{S}$ ($X \cup Z \cup C\in\mathbb{S}$):
+
+
+```{r}
+
+# Estimate causal forest
+start_time_11 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf5.no_M <- grf::causal_forest(cbind(X, Z, C), y_5, w_5, orthog.boosting = TRUE)
+
+
+end_time_11 <- Sys.time()
+
+#Predicted values
+
+pred_tau_5.no_M <- predict(cf5.no_M, estimate.variance = TRUE)
+
+plot_pred_tau_11 <- ggplot(data = as.data.frame(pred_tau_5.no_M$predictions), 
+       aes(x = (pred_tau_5.no_M$predictions))) +
+  geom_histogram(binwidth = 0.1, fill="#f68060", alpha=.6) + 
+  labs(title ="Simulation 5, M not adjusted", 
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_11
+```
+
+Runing time:
+```{r}
+start_time_11 - end_time_11
+```
+
+
+RMSE:
+```{r}
+rmse_5.no_M <- fun.rmse(predicted = pred_tau_5.no_M$predictions, true = tau)
+
+rmse_5.no_M
+```
+
+Coverage:
+
+```{r}
+coverage_5.no_M <- fun.coverage(pred_tau_5.no_M, tau)
+
+coverage_5.no_M
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_5.no_M <- average_treatment_effect(cf5.no_M)
+
+ATE_est_5.no_M
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_5.no_M, ATE_true = tau) 
+```
+
+
+```{r}
+true_vs_pred_5.no_M <- as.data.frame(cbind(tau, pred_tau_5.no_M$predictions))
+
+colnames(true_vs_pred_5.no_M) <- c("tau", "pred_tau")
+
+true_vs_pred_5.no_M$tau <- true_vs_pred_5.no_M$tau + rnorm(n, 0 , sd = 0.0001)
+
+plot11 <- ggplot(data = true_vs_pred_5.no_M, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 5, M not adjusted",
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_5.no_M$pred_tau), max(true_vs_pred_5.no_M$pred_tau)),
+       y = c(min(true_vs_pred_5.no_M$pred_tau), max(true_vs_pred_5.no_M$pred_tau)))
+
+plot11
+```
+
+
+
+*Summary*
+
+Predicted $\hat{\tau}s$:
+
+```{r}
+grid.arrange(plot_pred_tau_10, plot_pred_tau_11, nrow = 1)
+```
+
+True $\tau$ vs. predicted $\hat{\tau}$:
+
+```{r}
+grid.arrange(plot10, plot11, nrow = 1)
+
+```
+
+RMSEs:
+
+```{r}
+
+rmse_5 <- as.data.frame(c(rmse_5.with_M, rmse_5.no_M))
+
+rownames(rmse_5) <- c("$M$ adjusted", "$M$ not adjusted")
+
+colnames(rmse_5) <- c("RMSE")
+
+knitr::kable(rmse_5, escape = FALSE)
+```
+
+Coverages:
+
+```{r}
+
+coverage_5 <- as.data.frame(c(coverage_5.with_M, coverage_5.no_M))
+
+rownames(coverage_5) <-  c("$M$ adjusted", "$M$ not adjusted")
+
+colnames(coverage_5) <- c("Coverage")
+
+knitr::kable(coverage_5, escape = FALSE)
+
+```
+
+LaTeX:
+
+```{r}
+knitr::kable(rmse_5, format = "latex",escape = FALSE)
+
+knitr::kable(coverage_5, format = "latex",escape = FALSE)
+```
+
+
+
+
+
+##Randomized Controlled Trial with Heterogeneous Treatment Effect, Including Covariates Affecting to Output
+
+The first estimation for a heterogeneous treatment effect. At first, let's test with the full set of observed variables  ($X\in\mathbb{S}$)::
+
+
+
+```{r}
+
+# Estimate causal forest
+start_time_12 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf6.full <- grf::causal_forest(X, y_6, w_1, orthog.boosting = FALSE)
+
+
+end_time_12 <- Sys.time()
+
+#Predicted values
+
+pred_tau_6.full <- predict(cf6.full, estimate.variance = TRUE)
+
+plot_pred_tau_12 <- cbind(pred_tau_6.full$predictions, tau_1) %>%
+  as.data.frame() %>%
+  dplyr::rename(Predicted = V1) %>%
+  dplyr::rename(True = tau_1) %>%
+  gather(key = "key", value = "value") %>%
+  ggplot(aes(x = value, fill = key)) +
+  geom_histogram(binwidth = 0.1, alpha=.6) + 
+  scale_fill_manual(name = "", values=c("#f68060", "#57b2eb")) +
+  labs(title ="Simulation 6 with the whole set X",
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_12
+```
+
+Runing time:
+```{r}
+start_time_12 - end_time_12
+```
+
+
+RMSE:
+```{r}
+rmse_6.full <- fun.rmse(predicted = pred_tau_6.full$predictions, true = tau_1)
+
+rmse_6.full
+```
+
+
+Coverage:
+
+```{r}
+coverage_6.full <- fun.coverage(pred_tau_6.full, tau_1)
+
+coverage_6.full
+```
+
+
+Estimated ATE:
+```{r}
+ATE_est_6.full <- average_treatment_effect(cf6.full)
+
+ATE_est_6.full
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_6.full, ATE_true = mean(tau_1)) 
+```
+
+
+```{r}
+true_vs_pred_6.full <- as.data.frame(cbind(tau_1, pred_tau_6.full$predictions))
+
+colnames(true_vs_pred_6.full) <- c("tau", "pred_tau")
+
+plot12 <- ggplot(data = true_vs_pred_6.full, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 6 with the whole set X",
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_6.full), max(true_vs_pred_6.full)),
+       y = c(min(true_vs_pred_6.full), max(true_vs_pred_6.full)))
+
+plot12
+```
+
+Let's use only the most important variables and see how it affects in the predictions: 
+```{r}
+important_var_6 <- which(variable_importance(cf6.full) >= median(variable_importance(cf6.full))) #Variables over the median
+```
+
+
+
+```{r}
+
+# Estimate causal forest
+start_time_13 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf6.important <- grf::causal_forest(X[, important_var_6], y_6, w_1, orthog.boosting = FALSE)
+
+
+end_time_13 <- Sys.time()
+
+#Predicted values
+
+pred_tau_6.important <- predict(cf6.important, estimate.variance = TRUE)
+
+plot_pred_tau_13 <- cbind(pred_tau_6.important$predictions, tau_1) %>%
+  as.data.frame() %>%
+  dplyr::rename(Predicted = V1) %>%
+  dplyr::rename(True = tau_1) %>%
+  gather(key = "key", value = "value") %>%
+  ggplot(aes(x = value, fill = key)) +
+  geom_histogram(binwidth = 0.1, alpha=.6) + 
+  scale_fill_manual(name = "", values=c("#f68060", "#57b2eb")) +
+  labs(title ="Simulation 6 with a subset of X",
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_13
+```
+
+Runing time:
+```{r}
+start_time_13 - end_time_13
+```
+
+
+RMSE:
+```{r}
+rmse_6.important <- fun.rmse(predicted = pred_tau_6.important$predictions, true = tau_1)
+```
+
+
+
+Coverage:
+
+```{r}
+coverage_6.important <- fun.coverage(pred_tau_6.important, tau_1)
+
+coverage_6.important
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_6.important <- average_treatment_effect(cf6.important)
+
+ATE_est_6.important
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_6.important, ATE_true = mean(tau_1)) 
+```
+
+
+```{r}
+true_vs_pred_6.important <- as.data.frame(cbind(tau_1, pred_tau_6.important$predictions))
+
+colnames(true_vs_pred_6.important) <- c("tau", "pred_tau")
+
+plot13 <- ggplot(data = true_vs_pred_6.important, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 6 with a subsetset of X",
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_6.important), max(true_vs_pred_6.important)), 
+       y = c(min(true_vs_pred_6.important), max(true_vs_pred_6.important)))
+
+plot13
+```
+
+
+*Summary*
+
+Predicted $\hat{\tau}s$:
+
+```{r}
+grid.arrange(plot_pred_tau_12, plot_pred_tau_13, nrow = 1)
+```
+
+True $\tau$ vs. predicted $\hat{\tau}$:
+
+```{r}
+grid.arrange(plot12, plot13, nrow = 1)
+
+```
+
+RMSEs:
+
+```{r}
+
+rmse_6 <- as.data.frame(c(rmse_6.full, rmse_6.important))
+
+rownames(rmse_6) <- c("Full set $X$", "Subset of $X$")
+
+colnames(rmse_6) <- c("RMSE")
+
+knitr::kable(rmse_6, escape = FALSE)
+```
+
+Coverages:
+
+```{r}
+
+coverage_6 <- as.data.frame(c(coverage_6.full, coverage_6.important))
+
+rownames(coverage_6) <-  c("Full set $X$", "Subset of $X$")
+
+colnames(coverage_6) <- c("Coverage")
+
+knitr::kable(coverage_6, escape = FALSE)
+
+```
+
+LaTeX:
+
+```{r}
+knitr::kable(rmse_6, format = "latex",escape = FALSE)
+
+knitr::kable(coverage_6, format = "latex",escape = FALSE)
+```
+
+
+
+
+##Heterogeneous Treatment Effect with the Confounded Assignment, Including Covariates Affecting to Output
+
+Without orthogonalization:
+
+```{r}
+
+# Estimate causal forest
+start_time_14 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf7.no_ort <- grf::causal_forest(cbind(X, Z, C), y_7, w_3, orthog.boosting = FALSE)
+
+
+end_time_14 <- Sys.time()
+
+#Predicted values
+
+pred_tau_7.no_ort <- predict(cf7.no_ort, estimate.variance = TRUE)
+
+plot_pred_tau_14 <- cbind(pred_tau_7.no_ort$predictions, tau_2) %>%
+  as.data.frame() %>%
+  dplyr::rename(Predicted = V1) %>%
+  dplyr::rename(True = tau_2) %>%
+  gather(key = "key", value = "value") %>%
+  ggplot(aes(x = value, fill = key)) +
+  geom_histogram(binwidth = 0.1, alpha=.6) + 
+  scale_fill_manual(name = "", values=c("#f68060", "#57b2eb")) +
+  labs(title ="Simulation 7 withoutorthogonalization", x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_14
+```
+
+Runing time:
+```{r}
+start_time_14 - end_time_14
+```
+
+
+RMSE:
+```{r}
+rmse_7.no_ort <- fun.rmse(predicted = pred_tau_7.no_ort$predictions, true = tau_2)
+
+rmse_7.no_ort
+```
+
+Coverage:
+
+```{r}
+coverage_7.no_ort <- fun.coverage(pred_tau_7.no_ort, tau_2)
+
+coverage_7.no_ort
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_7.no_ort <- average_treatment_effect(cf7.no_ort)
+
+ATE_est_7.no_ort
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_7.no_ort, ATE_true = mean(tau_2)) 
+```
+
+
+```{r}
+true_vs_pred_7.no_ort <- as.data.frame(cbind(tau_2, pred_tau_7.no_ort$predictions))
+
+colnames(true_vs_pred_7.no_ort) <- c("tau", "pred_tau")
+
+plot14 <- ggplot(data = true_vs_pred_7.no_ort, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 7 without orthogonalization", 
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_7.no_ort), max(true_vs_pred_7.no_ort)),
+       y = c(min(true_vs_pred_7.no_ort), max(true_vs_pred_7.no_ort)))
+
+plot14
+```
+
+With orthogonalization:
+
+```{r}
+
+# Estimate causal forest
+start_time_15 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf7.with_ort <- grf::causal_forest(cbind(X,Z, C), y_7, w_3, orthog.boosting = TRUE)
+
+
+end_time_15 <- Sys.time()
+
+#Predicted values
+
+pred_tau_7.with_ort <- predict(cf7.with_ort, estimate.variance = TRUE)
+
+plot_pred_tau_15 <- cbind(pred_tau_7.with_ort$predictions, tau_2) %>%
+  as.data.frame() %>%
+  dplyr::rename(Predicted = V1) %>%
+  dplyr::rename(True = tau_2) %>%
+  gather(key = "key", value = "value") %>%
+  ggplot(aes(x = value, fill = key)) +
+  geom_histogram(binwidth = 0.1, alpha=.6) + 
+  scale_fill_manual(name = "", values=c("#f68060", "#57b2eb")) +
+  labs(title ="Simulation 7 with orthogonalization",
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_15
+```
+
+Runing time:
+```{r}
+start_time_15 - end_time_15
+```
+
+
+RMSE:
+```{r}
+rmse_7.with_ort <- fun.rmse(predicted = pred_tau_7.with_ort$predictions, true = tau_2)
+
+rmse_7.with_ort
+```
+
+Coverage:
+
+```{r}
+coverage_7.with_ort <- fun.coverage(pred_tau_7.with_ort, tau_2)
+
+coverage_7.with_ort
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_7.with_ort <- average_treatment_effect(cf7.with_ort)
+
+ATE_est_7.with_ort
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_7.with_ort, ATE_true = mean(tau_2)) 
+```
+
+
+```{r}
+true_vs_pred_7.with_ort <- as.data.frame(cbind(tau_2, pred_tau_7.with_ort$predictions))
+
+colnames(true_vs_pred_7.with_ort) <- c("tau", "pred_tau")
+
+plot15 <- ggplot(data = true_vs_pred_7.with_ort, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 7 with orthogonalization",
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_7.with_ort), max(true_vs_pred_7.with_ort)), 
+       y = c(min(true_vs_pred_7.with_ort), max(true_vs_pred_7.with_ort)))
+
+plot15
+```
+
+
+
+*Summary*
+
+Predicted $\hat{\tau}s$:
+
+```{r}
+grid.arrange(plot_pred_tau_14, plot_pred_tau_15, nrow = 1)
+```
+
+True $\tau$ vs. predicted $\hat{\tau}$:
+
+```{r}
+grid.arrange(plot14, plot15, nrow = 1)
+
+```
+
+RMSEs:
+
+```{r}
+
+rmse_7 <- as.data.frame(c(rmse_7.no_ort, rmse_7.with_ort))
+
+rownames(rmse_7) <- c("With orthogonalization", "Without orthogonalization")
+
+colnames(rmse_7) <- c("RMSE")
+
+knitr::kable(rmse_7, escape = FALSE)
+```
+
+Coverages:
+
+```{r}
+
+coverage_7 <- as.data.frame(c(coverage_7.no_ort, coverage_7.with_ort))
+
+rownames(coverage_7) <-  c("With orthogonalization", "Without orthogonalization")
+
+colnames(coverage_7) <- c("Coverage")
+
+knitr::kable(coverage_7, escape = FALSE)
+
+```
+
+LaTeX:
+
+```{r}
+knitr::kable(rmse_7, format = "latex",escape = FALSE)
+
+knitr::kable(coverage_7, format = "latex",escape = FALSE)
+```
+
+
+##Heterogeneous Treatment Effect with Confounded Assignment, Including Covariates Affecting to Output and a Pure Local M-Structure
+
+With $M$ ($X \cup Z \cup C \cup   M\in\mathbb{S}$):
+
+
+```{r}
+
+# Estimate causal forest
+start_time_16 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf8.with_M <- grf::causal_forest(cbind(X, Z, C, m), y_8, w_4, orthog.boosting = TRUE)
+
+
+end_time_16 <- Sys.time()
+
+#Predicted values
+
+pred_tau_8.with_M <- predict(cf8.with_M, estimate.variance = TRUE)
+
+plot_pred_tau_16 <- cbind(pred_tau_8.with_M$predictions, tau_2) %>%
+  as.data.frame() %>%
+  dplyr::rename(Predicted = V1) %>%
+  dplyr::rename(True = tau_2) %>%
+  gather(key = "key", value = "value") %>%
+  ggplot(aes(x = value, fill = key)) +
+  geom_histogram(binwidth = 0.1, alpha=.6) + 
+  scale_fill_manual(name = "", values=c("#f68060", "#57b2eb")) +
+  labs(title ="Simulation 8, M adjusted", 
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_16
+```
+
+Runing time:
+```{r}
+start_time_16 - end_time_16
+```
+
+
+RMSE:
+```{r}
+rmse_8.with_M <- fun.rmse(predicted = pred_tau_8.with_M$predictions, true = tau_2)
+
+rmse_8.with_M
+```
+
+Coverage:
+
+```{r}
+coverage_8.with_M <- fun.coverage(pred_tau_8.with_M, tau_2)
+
+coverage_8.with_M
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_8.with_M <- average_treatment_effect(cf8.with_M)
+
+ATE_est_8.with_M
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_8.with_M, ATE_true = mean(tau_2)) 
+```
+
+
+```{r}
+true_vs_pred_8.with_M <- as.data.frame(cbind(tau_2, pred_tau_8.with_M$predictions))
+
+colnames(true_vs_pred_8.with_M) <- c("tau", "pred_tau")
+
+plot16 <- ggplot(data = true_vs_pred_8.with_M, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 8, M adjusted", 
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_8.with_M), max(true_vs_pred_8.with_M)), 
+       y = c(min(true_vs_pred_8.with_M), max(true_vs_pred_8.with_M)))
+
+plot16
+```
+
+$M\not\in\mathbb{S}$ ($X \cup Z \cup C  \in\mathbb{S}$):
+
+
+```{r}
+
+# Estimate causal forest
+start_time_17 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf8.no_M <- grf::causal_forest(cbind(X, Z, C), y_8, w_4, orthog.boosting = TRUE)
+
+
+end_time_17 <- Sys.time()
+
+#Predicted values
+
+pred_tau_8.no_M <- predict(cf8.no_M, estimate.variance = TRUE)
+
+plot_pred_tau_17 <- cbind(pred_tau_8.no_M$predictions, tau_2) %>%
+  as.data.frame() %>%
+  dplyr::rename(Predicted = V1) %>%
+  dplyr::rename(True = tau_2) %>%
+  gather(key = "key", value = "value") %>%
+  ggplot(aes(x = value, fill = key)) +
+  geom_histogram(binwidth = 0.1, alpha=.6) + 
+  scale_fill_manual(name = "", values=c("#f68060", "#57b2eb")) +
+  labs(title ="Simulation 8, M not adjusted", 
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_17
+```
+
+Runing time:
+```{r}
+start_time_17 - end_time_17
+```
+
+
+RMSE:
+```{r}
+rmse_8.no_M <- fun.rmse(predicted = pred_tau_8.no_M$predictions, true = tau_2)
+```
+
+Coverage:
+
+```{r}
+coverage_8.no_M <- fun.coverage(pred_tau_8.no_M, tau_2)
+
+coverage_8.no_M
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_8.no_M <- average_treatment_effect(cf8.no_M)
+
+ATE_est_8.no_M
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_8.no_M, ATE_true = mean(tau_2)) 
+```
+
+
+```{r}
+true_vs_pred_8.no_M <- as.data.frame(cbind(tau_2, pred_tau_8.no_M$predictions))
+
+colnames(true_vs_pred_8.no_M) <- c("tau", "pred_tau")
+
+plot17 <- ggplot(data = true_vs_pred_8.no_M, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 8, M not adjusted", 
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_8.no_M), max(true_vs_pred_8.no_M)), 
+       y = c(min(true_vs_pred_8.no_M), max(true_vs_pred_8.no_M)))
+
+plot17
+```
+
+*Summary*
+
+Predicted $\hat{\tau}s$:
+
+```{r}
+grid.arrange(plot_pred_tau_16, plot_pred_tau_17, nrow = 1)
+```
+
+True $\tau$ vs. predicted $\hat{\tau}$:
+
+```{r}
+grid.arrange(plot16, plot17, nrow = 1)
+
+```
+
+RMSEs:
+
+```{r}
+
+rmse_8 <- as.data.frame(c(rmse_8.with_M, rmse_8.no_M))
+
+rownames(rmse_8) <- c("$M$ adjusted", "$M$ not adjusted")
+
+colnames(rmse_8) <- c("RMSE")
+
+knitr::kable(rmse_8, escape = FALSE)
+```
+
+Coverages:
+
+```{r}
+
+coverage_8 <- as.data.frame(c(coverage_8.with_M, coverage_8.no_M))
+
+rownames(coverage_8) <-  c("$M$ adjusted", "$M$ not adjusted")
+
+colnames(coverage_8) <- c("Coverage")
+
+knitr::kable(coverage_8, escape = FALSE)
+
+```
+
+LaTeX:
+
+```{r}
+knitr::kable(rmse_8, format = "latex",escape = FALSE)
+
+knitr::kable(coverage_8, format = "latex",escape = FALSE)
+```
+
+
+##Heterogeneous Treatment Effect with Confounded Assignment, Including Covariates Affecting to Output and a Impure Local M-Structure
+
+With $M$ ($X \cup Z \cup C \cup   M\in\mathbb{S}$):
+
+
+```{r}
+
+# Estimate causal forest
+start_time_18 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf9.with_M <- grf::causal_forest(cbind(X, Z, C, m), y_9, w_5, orthog.boosting = TRUE)
+
+
+end_time_18 <- Sys.time()
+
+#Predicted values
+
+pred_tau_9.with_M <- predict(cf9.with_M, estimate.variance = TRUE)
+
+plot_pred_tau_18 <- cbind(pred_tau_9.with_M$predictions, tau_2) %>%
+  as.data.frame() %>%
+  dplyr::rename(Predicted = V1) %>%
+  dplyr::rename(True = tau_2) %>%
+  gather(key = "key", value = "value") %>%
+  ggplot(aes(x = value, fill = key)) +
+  geom_histogram(binwidth = 0.1, alpha=.6) + 
+  scale_fill_manual(name = "", values=c("#f68060", "#57b2eb")) +
+  labs(title ="Simulation 9, M adjusted",
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_18
+```
+
+Runing time:
+```{r}
+start_time_18 - end_time_18
+```
+
+
+RMSE:
+```{r}
+rmse_9.with_M <- fun.rmse(predicted = pred_tau_9.with_M$predictions, true = tau_2)
+
+rmse_9.with_M
+```
+
+Coverage:
+
+```{r}
+coverage_9.with_M <- fun.coverage(pred_tau_9.with_M, tau_2)
+
+coverage_9.with_M
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_9.with_M <- average_treatment_effect(cf9.with_M)
+
+ATE_est_9.with_M
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_9.with_M, ATE_true = mean(tau_2)) 
+```
+
+
+```{r}
+true_vs_pred_9.with_M <- as.data.frame(cbind(tau_2, pred_tau_9.with_M$predictions))
+
+colnames(true_vs_pred_9.with_M) <- c("tau", "pred_tau")
+
+plot18 <- ggplot(data = true_vs_pred_9.with_M, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 8, M not adjusted", 
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_9.with_M), max(true_vs_pred_9.with_M)), 
+       y = c(min(true_vs_pred_9.with_M), max(true_vs_pred_9.with_M)))
+
+plot18
+```
+
+$M\not\in\mathbb{S}$ ($X \cup Z \cup C \in\mathbb{S}$):
+
+
+```{r}
+
+# Estimate causal forest
+start_time_19 <- Sys.time() #Recording the running time
+
+#Fitting the model
+cf9.no_M <- grf::causal_forest(cbind(X, Z, C), y_9, w_5, orthog.boosting = TRUE)
+
+
+end_time_19 <- Sys.time()
+
+#Predicted values
+
+pred_tau_9.no_M <- predict(cf9.no_M, estimate.variance = TRUE)
+
+plot_pred_tau_19 <- cbind(pred_tau_9.no_M$predictions, tau_2) %>%
+  as.data.frame() %>%
+  dplyr::rename(Predicted = V1) %>%
+  dplyr::rename(True = tau_2) %>%
+  gather(key = "key", value = "value") %>%
+  ggplot(aes(x = value, fill = key)) +
+  geom_histogram(binwidth = 0.1, alpha=.6) + 
+  scale_fill_manual(name = "", values=c("#f68060", "#57b2eb")) +
+  labs(title ="Simulation 9, M not adjusted", 
+       x = "Treatment Effect", y = "Count") +
+  theme_minimal()
+
+plot_pred_tau_19
+```
+
+Runing time:
+```{r}
+start_time_19 - end_time_19
+```
+
+
+RMSE:
+```{r}
+rmse_9.no_M <- fun.rmse(predicted = pred_tau_9.no_M$predictions, true = tau_2)
+
+rmse_9.no_M
+```
+
+Coverage:
+
+```{r}
+coverage_9.no_M <- fun.coverage(pred_tau_9.no_M, tau_2)
+
+coverage_9.no_M
+
+```
+
+
+
+Estimated ATE:
+```{r}
+ATE_est_9.no_M <- average_treatment_effect(cf9.no_M)
+
+ATE_est_9.no_M
+```
+
+
+
+The _proportional difference in the ATE estimates_ for the whole population:
+```{r}
+fun.diff_ATE(ATE_est = ATE_est_9.no_M, ATE_true = mean(tau_2)) 
+```
+
+
+```{r}
+true_vs_pred_9.no_M <- as.data.frame(cbind(tau_2, pred_tau_9.no_M$predictions))
+
+colnames(true_vs_pred_9.no_M) <- c("tau", "pred_tau")
+
+plot19<- ggplot(data = true_vs_pred_9.no_M, aes(x = tau, y = pred_tau)) +
+  geom_bin2d() +
+  geom_abline(slope = 1, intercept = 0, colour = "red", size = 1) +
+  theme_minimal() + 
+  labs(title = "Simulation 8, M not adjusted",
+       x = "True treatment effect", y = "Estimated treatment effect", fill = "Count") +
+  lims(x = c(min(true_vs_pred_9.no_M), max(true_vs_pred_9.no_M)), 
+       y = c(min(true_vs_pred_9.no_M), max(true_vs_pred_9.no_M)))
+
+plot19
+```
+
+*Summary*
+
+Predicted $\hat{\tau}s$:
+
+```{r}
+grid.arrange(plot_pred_tau_18, plot_pred_tau_19, nrow = 1)
+```
+
+True $\tau$ vs. predicted $\hat{\tau}$:
+
+```{r}
+grid.arrange(plot18, plot19, nrow = 1)
+
+```
+
+RMSEs:
+
+```{r}
+
+rmse_9 <- as.data.frame(c(rmse_9.with_M, rmse_9.no_M))
+
+rownames(rmse_9) <- c("$M$ adjusted", "$M$ not adjusted")
+
+colnames(rmse_9) <- c("RMSE")
+
+knitr::kable(rmse_9, escape = FALSE)
+```
+
+Coverages:
+
+```{r}
+
+coverage_9 <- as.data.frame(c(coverage_9.with_M, coverage_9.no_M))
+
+rownames(coverage_9) <-  c("$M$ adjusted", "$M$ not adjusted")
+
+colnames(coverage_9) <- c("Coverage")
+
+knitr::kable(coverage_9, escape = FALSE)
+
+```
+
+LaTeX:
+
+```{r}
+knitr::kable(rmse_9, format = "latex",escape = FALSE)
+
+knitr::kable(coverage_9, format = "latex",escape = FALSE)
+```
